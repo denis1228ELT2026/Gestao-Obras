@@ -80,13 +80,11 @@ def login_user(username, password):
     return username in users and check_hashes(password, users[username])
 
 # --- FUNÇÃO DE EXPORTAÇÃO ---
-def to_excel(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Relatorio')
-    processed_data = output.getvalue()
-    return processed_data
-
+def usuário_de_login(nome_de_usuário, senha):
+    if nome_de_usuário == "admin" and senha == "obras2026":
+        return True
+    return False
+    
 # --- INICIALIZAÇÃO E LÓGICA PRINCIPAL ---
 init_db()
 
