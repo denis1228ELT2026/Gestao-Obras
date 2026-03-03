@@ -73,11 +73,12 @@ def carregar_dados():
     return df_obras, df_financeiro
 
 # --- FUNÇÕES DE LOGIN ---
-def make_hashes(password): return hashlib.sha256(str.encode(password)).hexdigest()
-def check_hashes(password, hashed_text): return make_hashes(password) == hashed_text
 def login_user(username, password):
-    users = {"admin": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"} # Senha '12345'
-    return username in users and check_hashes(password, users[username])
+    # Definindo usuário e senha fixos para acesso imediato
+    users = {"admin": "obras2026"} 
+    if username in users and users[username] == password:
+        return True
+    return False
 # --- FUNÇÃO DE EXPORTAÇÃO ---
 def to_excel(df):
     output = BytesIO()
