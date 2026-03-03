@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime
 import sqlite3
 import hashlib
@@ -8,7 +9,7 @@ from io import BytesIO
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Sistema de Gestão de Obras",
+    page_title="OBRA PRO - Gestão Elétrica",
     page_icon="🏗️",
     layout="wide"
 )
@@ -26,7 +27,6 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='obras'")
     if cursor.fetchone() is None:
-        st.toast("Criando banco de dados inicial...")
         # Tabela de Obras
         cursor.execute('''
             CREATE TABLE obras (
@@ -34,7 +34,7 @@ def init_db():
                 Valor_Contrato REAL, BDI_Aplicado_Percent REAL, Data_Inicio TEXT, Data_Termino_Prevista TEXT
             )
         ''')
-        # Tabela Financeira (agora com quantidade e unidade)
+        # Tabela Financeira
         cursor.execute('''
             CREATE TABLE financeiro (
                 ID_Lancamento INTEGER PRIMARY KEY AUTOINCREMENT, ID_Obra INTEGER, Data_Lancamento TEXT,
@@ -43,22 +43,6 @@ def init_db():
                 FOREIGN KEY (ID_Obra) REFERENCES obras (ID_Obra)
             )
         ''')
-        # Dados Iniciais
-        obras_iniciais = [
-            ('Reforma Hospital Municipal', 'Pública', 500000, 25.0, '2026-01-15', '2026-07-31'),
-            ('Manutenção Iluminação Pública', 'Pública', 200000, 28.0, '2026-02-01', '2026-05-30'),
-            ('Instalação Predial Particular', 'Privada', 80000, 20.0, '2026-03-01', '2026-04-30')
-        ]
-        cursor.executemany("INSERT INTO obras (Nome_Obra, Tipo_Obra, Valor_Contrato, BDI_Aplicado_Percent, Data_Inicio, Data_Termino_Prevista) VALUES (?, ?, ?, ?, ?, ?)", obras_iniciais)
-        financeiro_inicial = [
-            (1, '2026-02-10', 'Saída', 'Materiais Elétricos', 180000, 'Cabo Flexível 2,5mm', 2000, 'm'),
-            (1, '2026-02-25', 'Saída', 'Mão de Obra', 120000, 'Folha Fev/26', 1, 'cj'),
-            (2, '2026-02-20', 'Saída', 'Materiais Elétricos', 95000, 'Luminária LED 150W', 50, 'pç'),
-            (3, '2026-03-12', 'Saída', 'Materiais Elétricos', 12000, 'Quadro de Distribuição', 2, 'pç'),
-            (1, '2026-04-05', 'Entrada', 'Medição', 250000, '1ª Medição', 1, 'cj'),
-            (2, '2026-04-10', 'Entrada', 'Medição', 100000, '1ª Medição', 1, 'cj')
-        ]
-        cursor.executemany("INSERT INTO financeiro (ID_Obra, Data_Lancamento, Tipo_Lancamento, Categoria, Valor, Descricao, Quantidade, Unidade) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", financeiro_inicial)
         conn.commit()
     conn.close()
 
@@ -74,11 +58,11 @@ def carregar_dados():
 
 # --- FUNÇÕES DE LOGIN ---
 def login_user(username, password):
-    # Definindo usuário e senha fixos para acesso imediato
     users = {"admin": "obras2026"} 
     if username in users and users[username] == password:
         return True
     return False
+
 # --- FUNÇÃO DE EXPORTAÇÃO ---
 def to_excel(df):
     output = BytesIO()
@@ -86,16 +70,17 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Relatorio')
     processed_data = output.getvalue()
     return processed_data
-    
-# --- INICIALIZAÇÃO E LÓGICA PRINCIPAL ---
+
+# --- INICIALIZAÇÃO ---
 init_db()
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
+# --- TELA DE LOGIN ---
 if not st.session_state['authenticated']:
     st.title("Sistema de Gestão de Obras Elétricas 🏗️")
-    st.header("Login")
+    st.header("Conecte-se")
     username = st.text_input("Usuário")
     password = st.text_input("Senha", type='password')
     if st.button("Entrar"):
@@ -104,65 +89,118 @@ if not st.session_state['authenticated']:
             st.rerun()
         else:
             st.error("Usuário ou senha incorretos.")
+
+# --- SISTEMA PÓS-LOGIN ---
 else:
     df_obras, df_financeiro = carregar_dados()
     
-    st.sidebar.title(f"Bem-vindo, Admin!")
-    pagina_selecionada = st.sidebar.radio("Selecione uma página:", ["Dashboard Geral", "Dashboard por Obra", "Lançamento Financeiro", "Análise de Insumos", "Relatórios"])
+    # MENU LATERAL ESTILO "OBRA PRIMA"
+    st.sidebar.title("🏗️ OBRA PRO v1.0")
+    st.sidebar.markdown(f"**Usuário:** Admin")
+    
+    pagina = st.sidebar.radio("Navegação", [
+        "Painel Gerencial", 
+        "Gestão de Obras", 
+        "Lançamento Financeiro", 
+        "Análise de Insumos", 
+        "Relatórios",
+        "Configurações"
+    ])
+    
     if st.sidebar.button("Sair"):
         st.session_state['authenticated'] = False
         st.rerun()
 
-    # --- PÁGINA 1: DASHBOARD GERAL ---
-    if pagina_selecionada == "Dashboard Geral":
-        st.title("📊 Dashboard Geral de Obras")
-        df_obras['Custo_Direto_Orcado'] = df_obras['Valor_Contrato'] / (1 + (df_obras['BDI_Aplicado_Percent'] / 100))
-        gastos_por_obra = df_financeiro[df_financeiro['Tipo_Lancamento'] == 'Saída'].groupby('ID_Obra')['Valor'].sum().reset_index().rename(columns={'Valor': 'Total_Gasto'})
-        df_dashboard = pd.merge(df_obras, gastos_por_obra, on='ID_Obra', how='left').fillna(0)
-        df_dashboard['Percentual_Gasto'] = (df_dashboard['Total_Gasto'] / df_dashboard['Custo_Direto_Orcado']) * 100
+    # --- ABA 1: PAINEL GERENCIAL (ESTILO OBRA PRIMA) ---
+    if pagina == "Painel Gerencial":
+        st.title("📊 Painel Gerencial - BI")
         
-        st.header("Consumo do Orçamento por Obra")
-        cols = st.columns(len(df_dashboard))
-        for i, row in df_dashboard.iterrows():
-            with cols[i]:
-                st.subheader(row['Nome_Obra'])
-                fig = go.Figure(go.Indicator(mode="gauge+number", value=row['Percentual_Gasto'], title={'text': "Orçamento Consumido"}, gauge={'axis': {'range': [None, 100]}, 'steps': [{'range': [0, 70], 'color': 'lightgreen'}, {'range': [70, 90], 'color': 'yellow'}, {'range': [90, 100], 'color': 'red'}]}))
-                fig.update_layout(height=250, margin={'t':30, 'b':30, 'l':30, 'r':30})
-                st.plotly_chart(fig, use_container_width=True)
-                st.metric(label="Gasto / Orçado (Custo Direto)", value=f"R$ {row['Total_Gasto']:,.2f}", delta=f"R$ {row['Custo_Direto_Orcado']:,.2f}", delta_color="off")
+        # Cálculos para os Cards
+        total_contratos = df_obras['Valor_Contrato'].sum()
+        total_recebido = df_financeiro[df_financeiro['Tipo_Lancamento'] == 'Entrada']['Valor'].sum()
+        total_pago = df_financeiro[df_financeiro['Tipo_Lancamento'] == 'Saída']['Valor'].sum()
+        
+        # Linha de Indicadores (Cards)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total em Contratos", f"R$ {total_contratos:,.2f}")
+        c2.metric("Total Recebido (Medições)", f"R$ {total_recebido:,.2f}", delta="Entradas")
+        c3.metric("Total Pago (Custos)", f"R$ {total_pago:,.2f}", delta="-Saídas", delta_color="inverse")
+        c4.metric("Saldo em Caixa", f"R$ {(total_recebido - total_pago):,.2f}")
 
-    # --- PÁGINA 2: DASHBOARD POR OBRA ---
-    elif pagina_selecionada == "Dashboard por Obra":
-        st.title("🏗️ Dashboard por Obra")
-        obra_selecionada_nome = st.selectbox("Selecione uma Obra para Análise Detalhada", options=df_obras['Nome_Obra'])
-        
-        obra_detalhe = df_obras[df_obras['Nome_Obra'] == obra_selecionada_nome].iloc[0]
-        financeiro_obra = df_financeiro[df_financeiro['ID_Obra'] == obra_detalhe['ID_Obra']]
-        
-        total_entradas = financeiro_obra[financeiro_obra['Tipo_Lancamento'] == 'Entrada']['Valor'].sum()
-        total_saidas = financeiro_obra[financeiro_obra['Tipo_Lancamento'] == 'Saída']['Valor'].sum()
-        saldo_contrato = obra_detalhe['Valor_Contrato'] - total_entradas
-        lucro_liquido_real = total_entradas - total_saidas
-        
-        st.header(f"Análise da Obra: {obra_detalhe['Nome_Obra']}")
-        
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("Valor do Contrato", f"R$ {obra_detalhe['Valor_Contrato']:,.2f}")
-        kpi2.metric("Saldo a Receber", f"R$ {saldo_contrato:,.2f}", help="Valor do Contrato - Total de Entradas (Medições)")
-        kpi3.metric("BDI Aplicado", f"{obra_detalhe['BDI_Aplicado_Percent']}%")
-        kpi4.metric("Lucro Líquido Real", f"R$ {lucro_liquido_real:,.2f}", help="Total de Entradas - Total de Saídas")
-        
         st.divider()
-        
-        st.subheader("Materiais Comprados para esta Obra")
-        materiais_obra = financeiro_obra[financeiro_obra['Categoria'] == 'Materiais Elétricos']
-        if not materiais_obra.empty:
-            st.dataframe(materiais_obra[['Data_Lancamento', 'Descricao', 'Quantidade', 'Unidade', 'Valor']])
-        else:
-            st.info("Nenhum material elétrico lançado para esta obra ainda.")
 
-    # --- PÁGINA 3: LANÇAMENTO FINANCEIRO ---
-    elif pagina_selecionada == "Lançamento Financeiro":
+        # Gráficos de Fluxo (Simulando a imagem do Obra Prima)
+        col_esq, col_dir = st.columns(2)
+        
+        with col_esq:
+            st.subheader("Fluxo de Caixa Mensal")
+            fluxo_mensal = df_financeiro.groupby([df_financeiro['Data_Lancamento'].dt.strftime('%b'), 'Tipo_Lancamento'])['Valor'].sum().unstack().fillna(0)
+            if not fluxo_mensal.empty:
+                fig_fluxo = px.bar(fluxo_mensal, barmode='group', color_discrete_map={'Entrada': '#2ecc71', 'Saída': '#e74c3c'})
+                st.plotly_chart(fig_fluxo, use_container_width=True)
+            else:
+                st.info("Aguardando lançamentos para gerar gráfico.")
+
+        with col_dir:
+            st.subheader("Distribuição de Custos por Obra")
+            custos_obra = df_financeiro[df_financeiro['Tipo_Lancamento'] == 'Saída'].merge(df_obras, on='ID_Obra')
+            if not custos_obra.empty:
+                fig_pizza = px.pie(custos_obra, values='Valor', names='Nome_Obra', hole=0.4)
+                st.plotly_chart(fig_pizza, use_container_width=True)
+            else:
+                st.info("Sem dados de custos.")
+
+    # --- ABA 2: GESTÃO DE OBRAS (INTEGRADA COM SEU CÓDIGO) ---
+    elif pagina == "Gestão de Obras":
+        st.title("📂 Gestão e Cadastro de Obras")
+        
+        aba_obra = st.tabs(["Dashboard por Obra", "Cadastrar Nova Obra", "Lista de Obras"])
+        
+        with aba_obra[0]:
+            # SEU CÓDIGO ORIGINAL DE ANÁLISE POR OBRA
+            obra_selecionada_nome = st.selectbox("Selecione uma Obra", options=df_obras['Nome_Obra'])
+            obra_detalhe = df_obras[df_obras['Nome_Obra'] == obra_selecionada_nome].iloc[0]
+            fin_obra = df_financeiro[df_financeiro['ID_Obra'] == obra_detalhe['ID_Obra']]
+            
+            ent = fin_obra[fin_obra['Tipo_Lancamento'] == 'Entrada']['Valor'].sum()
+            sai = fin_obra[fin_obra['Tipo_Lancamento'] == 'Saída']['Valor'].sum()
+            
+            st.subheader(f"Status: {obra_detalhe['Nome_Obra']}")
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Contrato", f"R$ {obra_detalhe['Valor_Contrato']:,.2f}")
+            k2.metric("Gasto Real", f"R$ {sai:,.2f}")
+            k3.metric("Lucro Atual", f"R$ {(ent - sai):,.2f}")
+            
+            # Gráfico de Gauge que você tinha
+            progresso = (sai / (obra_detalhe['Valor_Contrato'] / (1 + obra_detalhe['BDI_Aplicado_Percent']/100))) * 100
+            fig_g = go.Figure(go.Indicator(mode="gauge+number", value=progresso, title={'text': "% Orçamento Consumido"}, gauge={'axis': {'range': [None, 100]}}))
+            fig_g.update_layout(height=300)
+            st.plotly_chart(fig_g)
+
+        with aba_obra[1]:
+            # NOVO FORMULÁRIO DE CADASTRO
+            st.subheader("Adicionar Novo Contrato Elétrico")
+            with st.form("nova_obra"):
+                nome = st.text_input("Nome da Obra")
+                tipo = st.selectbox("Tipo", ["Pública", "Privada"])
+                valor = st.number_input("Valor Total do Contrato", min_value=0.0)
+                bdi = st.number_input("BDI Aplicado (%)", min_value=0.0, value=25.0)
+                d_ini = st.date_input("Data de Início")
+                d_fim = st.date_input("Previsão de Término")
+                if st.form_submit_button("Salvar Obra"):
+                    conn = get_db_connection()
+                    conn.execute("INSERT INTO obras (Nome_Obra, Tipo_Obra, Valor_Contrato, BDI_Aplicado_Percent, Data_Inicio, Data_Termino_Prevista) VALUES (?, ?, ?, ?, ?, ?)",
+                                 (nome, tipo, valor, bdi, d_ini.strftime("%Y-%m-%d"), d_fim.strftime("%Y-%m-%d")))
+                    conn.commit()
+                    conn.close()
+                    st.success("Obra cadastrada!")
+                    st.rerun()
+
+        with aba_obra[2]:
+            st.dataframe(df_obras)
+
+    # --- ABA 3: LANÇAMENTO FINANCEIRO (SEU CÓDIGO ORIGINAL) ---
+    elif pagina == "Lançamento Financeiro":
         st.title("📝 Lançamento Financeiro")
         with st.form("lancamento_form", clear_on_submit=True):
             obra_selecionada = st.selectbox("Selecione a Obra", options=df_obras['Nome_Obra'])
@@ -178,7 +216,7 @@ else:
             with col_un:
                 unidade = st.selectbox("Unidade", ["un", "pç", "m", "kg", "cj", "vb"])
             
-            submitted = st.form_submit_button("Lançar")
+            submitted = st.form_submit_button("Registrar Lançamento")
             if submitted:
                 id_obra = df_obras[df_obras['Nome_Obra'] == obra_selecionada]['ID_Obra'].iloc[0]
                 conn = get_db_connection()
@@ -188,54 +226,27 @@ else:
                 )
                 conn.commit()
                 conn.close()
-                st.success(f"Lançamento de R$ {valor:,.2f} registrado com sucesso!")
+                st.success(f"Lançamento de R$ {valor:,.2f} registrado!")
 
-    # --- PÁGINA 4: ANÁLISE DE INSUMOS ---
-    elif pagina_selecionada == "Análise de Insumos":
-        st.title("🔍 Análise de Preço Médio de Insumos")
+    # --- ABA 4: ANÁLISE DE INSUMOS (SEU CÓDIGO ORIGINAL) ---
+    elif pagina == "Análise de Insumos":
+        st.title("🔍 Inteligência de Materiais")
         df_materiais = df_financeiro[(df_financeiro['Categoria'] == 'Materiais Elétricos') & (df_financeiro['Tipo_Lancamento'] == 'Saída')]
-        df_materiais['Preco_Unitario'] = df_materiais['Valor'] / df_materiais['Quantidade']
-        
-        st.info("Esta análise usa a 'Descrição' para agrupar itens. Mantenha um padrão nas descrições para melhores resultados (ex: sempre 'Cabo Flexível 2,5mm').")
-        
-        itens_unicos = df_materiais['Descricao'].unique()
-        item_selecionado = st.selectbox("Selecione um Insumo para Análise", options=itens_unicos)
-        
-        if item_selecionado:
+        if not df_materiais.empty:
+            df_materiais['Preco_Unitario'] = df_materiais['Valor'] / df_materiais['Quantidade']
+            item_selecionado = st.selectbox("Selecione um Insumo", options=df_materiais['Descricao'].unique())
             df_item = df_materiais[df_materiais['Descricao'] == item_selecionado]
-            preco_medio = df_item['Preco_Unitario'].mean()
-            unidade_item = df_item['Unidade'].iloc[0]
-            
-            st.metric(f"Preço Médio Pago por '{item_selecionado}'", f"R$ {preco_medio:,.2f} / {unidade_item}")
-            
-            st.subheader("Histórico de Compras deste Item")
-            st.dataframe(df_item[['Data_Lancamento', 'Quantidade', 'Unidade', 'Preco_Unitario', 'Valor']])
+            st.metric(f"Preço Médio: {item_selecionado}", f"R$ {df_item['Preco_Unitario'].mean():,.2f}")
+            st.dataframe(df_item)
+        else:
+            st.warning("Sem dados de materiais para analisar.")
 
-    # --- PÁGINA 5: RELATÓRIOS ---
-    elif pagina_selecionada == "Relatórios":
-        st.title("📄 Gerador de Relatórios")
-        st.subheader("Relatório de Medição para Obras Públicas")
-        
-        obras_publicas = df_obras[df_obras['Tipo_Obra'] == 'Pública']['Nome_Obra']
-        obra_relatorio_nome = st.selectbox("Selecione a Obra Pública", obras_publicas)
-        
-        if obra_relatorio_nome:
-            obra_info = df_obras[df_obras['Nome_Obra'] == obra_relatorio_nome].iloc[0]
-            financeiro_obra = df_financeiro[df_financeiro['ID_Obra'] == obra_info['ID_Obra']]
-            total_entradas = financeiro_obra[financeiro_obra['Tipo_Lancamento'] == 'Entrada']['Valor'].sum()
-            total_saidas = financeiro_obra[financeiro_obra['Tipo_Lancamento'] == 'Saída']['Valor'].sum()
-            
-            dados_relatorio = {
-                'Descrição': ['Valor Total do Contrato', 'Total de Medições Aprovadas', 'Saldo a Medir', 'Total de Custos Realizados'],
-                'Valor': [obra_info['Valor_Contrato'], total_entradas, obra_info['Valor_Contrato'] - total_entradas, total_saidas]
-            }
-            df_relatorio = pd.DataFrame(dados_relatorio)
-            
-            st.table(df_relatorio.style.format({'Valor': 'R$ {:,.2f}'}))
-            
-            st.download_button(
-                label="📥 Exportar Relatório para Excel",
-                data=to_excel(df_relatorio),
-                file_name=f"Relatorio_Medicao_{obra_relatorio_nome.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    # --- ABA 5: RELATÓRIOS (SEU CÓDIGO ORIGINAL) ---
+    elif pagina == "Relatórios":
+        st.title("📄 Relatórios e Exportação")
+        obra_rel = st.selectbox("Filtrar por Obra Pública", df_obras[df_obras['Tipo_Obra'] == 'Pública']['Nome_Obra'])
+        if obra_rel:
+            id_rel = df_obras[df_obras['Nome_Obra'] == obra_rel]['ID_Obra'].iloc[0]
+            df_final = df_financeiro[df_financeiro['ID_Obra'] == id_rel]
+            st.dataframe(df_final)
+            st.download_button("Exportar para Excel", data=to_excel(df_final), file_name="Relatorio_Obra.xlsx")
