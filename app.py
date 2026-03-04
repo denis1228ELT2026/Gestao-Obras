@@ -1,61 +1,78 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import sqlite3
-from io import BytesIO
-from fpdf import FPDF
 
-# --- CONFIGURAÇÃO VISUAL REFINADA (ALTA VISIBILIDADE) ---
+# --- 1. CONFIGURAÇÃO VISUAL (ALTA VISIBILIDADE) ---
 st.set_page_config(page_title="OBRA PRO - Engenharia", layout="wide")
 
 st.markdown("""
     <style>
-    /* Fundo geral mais claro para leitura e Sidebar Azul Marinho */
+    /* Fundo branco no conteúdo para leitura clara */
     .stApp { background-color: #FFFFFF; }
-    [data-testid="stSidebar"] { background-color: #001f3f; }
+    
+    /* Barra lateral Azul Marinho (Cor da Empresa) */
+    [data-testid="stSidebar"] { background-color: #001f3f !important; }
     [data-testid="stSidebar"] * { color: white !important; }
     
-    /* Estilo dos Cards de indicadores no Painel */
-    div[data-testid="stMetricValue"] { color: #001f3f !important; font-weight: bold; }
-    div[data-testid="stMetricLabel"] { color: #555555 !important; }
+    /* Títulos e Métricas em Azul Escuro */
+    h1, h2, h3 { color: #001f3f !important; font-family: 'Segoe UI', sans-serif; }
+    div[data-testid="stMetricValue"] { color: #001f3f !important; font-size: 32px !important; font-weight: bold; }
+    div[data-testid="stMetricLabel"] { color: #444444 !important; font-weight: bold; }
     
-    /* Botões padrão da empresa */
+    /* Botões Padrão */
     .stButton>button { 
         background-color: #001f3f; 
         color: white; 
         border-radius: 8px; 
-        width: 100%;
+        font-weight: bold;
         border: none;
     }
-    .stButton>button:hover { background-color: #003366; color: #ffcc00; }
+    .stButton>button:hover { background-color: #003366; border: 1px solid #ffcc00; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- CONEXÃO COM O BANCO DE DATOS ---
-DB_FILE = "gestao_obras.db" # Usando o seu nome de arquivo original
+# --- 2. GESTÃO DO BANCO DE DATOS ---
+DB_FILE = "gestao_obras_v3.db"
 
-def get_db_connection():
+def init_db():
     conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    c = conn.cursor()
+    # Tabela de Obras
+    c.execute('''CREATE TABLE IF NOT EXISTS obras (
+                    ID_Obra INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    Nome_Obra TEXT, 
+                    Tipo_Obra TEXT, 
+                    Valor_Contrato REAL, 
+                    BDI_Percent REAL)''')
+    # Tabela Financeira
+    c.execute('''CREATE TABLE IF NOT EXISTS financeiro (
+                    ID_Lancamento INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    ID_Obra INTEGER, 
+                    Data_Lancamento TEXT, 
+                    Tipo_Lancamento TEXT, 
+                    Categoria TEXT, 
+                    Valor REAL, 
+                    Descricao TEXT)''')
+    conn.commit()
+    conn.close()
 
 def carregar_dados():
-    conn = get_db_connection()
-    df_obras = pd.read_sql_query("SELECT * FROM obras", conn)
-    df_financeiro = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    conn = sqlite3.connect(DB_FILE)
+    df_o = pd.read_sql_query("SELECT * FROM obras", conn)
+    df_f = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
-    df_obras['Data_Inicio'] = pd.to_datetime(df_obras['Data_Inicio'])
-    df_financeiro['Data_Lancamento'] = pd.to_datetime(df_financeiro['Data_Lancamento'])
-    return df_obras, df_financeiro
+    return df_o, df_f
 
-# --- LOGIN ---
-if 'authenticated' not in st.session_state:
-    st.session_state['authenticated'] = False
+init_db()
 
-if not st.session_state['authenticated']:
-    # Imagem de fundo na tela de login
+# --- 3. SISTEMA DE LOGIN ---
+if 'auth' not in st.session_state:
+    st.session_state['auth'] = False
+
+if not st.session_state['auth']:
+    # Tela de Login com imagem de fundo (Subestação)
     st.markdown("""
         <style>
         .stApp {
@@ -65,121 +82,114 @@ if not st.session_state['authenticated']:
         </style>
         """, unsafe_allow_html=True)
     
-    col_l, col_c, col_r = st.columns([1,1.5,1])
+    col_l, col_c, col_r = st.columns([1, 1.2, 1])
     with col_c:
-        st.write("<br><br><br>", unsafe_allow_html=True)
+        st.write("<br><br>", unsafe_allow_html=True)
         st.title("🏗️ LOGIN OBRA PRO")
-        user = st.text_input("Usuário")
+        user = st.text_input("Usuário", value="admin")
         pw = st.text_input("Senha", type="password")
-        if st.button("Entrar no Sistema"):
+        if st.button("Acessar Painel"):
             if user == "admin" and pw == "obras2026":
-                st.session_state['authenticated'] = True
+                st.session_state['auth'] = True
                 st.rerun()
-            else: st.error("Usuário ou senha incorretos")
+            else:
+                st.error("Usuário ou senha incorretos.")
 else:
-    # --- INTERFACE PRINCIPAL APÓS LOGIN ---
-    df_obras, df_financeiro = carregar_dados()
+    # --- 4. INTERFACE PRINCIPAL ---
+    df_obras, df_fin = carregar_dados()
     
-    st.sidebar.title("🏗️ MENU PRINCIPAL")
-    menu = st.sidebar.radio("Navegação", [
-        "📊 Dashboard Geral (BI)", 
-        "🏗️ Gestão de Obras", 
-        "💰 Lançamento Financeiro", 
-        "👥 Equipe & RH",
-        "📝 Diário de Obra",
-        "🔍 Análise de Materiais"
-    ])
+    st.sidebar.title("🛠️ MENU PRINCIPAL")
+    menu = st.sidebar.radio("Navegação", ["📊 Painel Geral (BI)", "🏗️ Gestão de Obras", "💰 Lançamentos", "🔍 Materiais"])
 
-    if st.sidebar.button("Sair"):
-        st.session_state['authenticated'] = False
+    if st.sidebar.button("Sair do Sistema"):
+        st.session_state['auth'] = False
         st.rerun()
 
-    # 1. DASHBOARD GERAL (ESTILO OBRA PRIMA COM CORES CORRIGIDAS)
-    if menu == "📊 Dashboard Geral (BI)":
-        st.title("📊 Painel Gerencial Financeiro")
+    # --- ABA: DASHBOARD ---
+    if menu == "📊 Painel Geral (BI)":
+        st.header("📊 Resumo Financeiro da Empresa")
         
-        # Cálculos rápidos
-        total_entradas = df_financeiro[df_financeiro['Tipo_Lancamento'] == 'Entrada']['Valor'].sum()
-        total_saidas = df_financeiro[df_financeiro['Tipo_Lancamento'] == 'Saída']['Valor'].sum()
-        lucro = total_entradas - total_saidas
+        # Cálculos de Indicadores
+        total_ent = df_fin[df_fin['Tipo_Lancamento'] == 'Entrada']['Valor'].sum() if not df_fin.empty else 0
+        total_sai = df_fin[df_fin['Tipo_Lancamento'] == 'Saída']['Valor'].sum() if not df_fin.empty else 0
+        lucro = total_ent - total_sai
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Medições (Entrada)", f"R$ {total_entradas:,.2f}")
-        c2.metric("Total Custos (Saída)", f"R$ {total_saidas:,.2f}")
-        c3.metric("Lucro Bruto Atual", f"R$ {lucro:,.2f}")
-        c4.metric("Obras em Andamento", len(df_obras))
-
+        c1.metric("Medições (Receita)", f"R$ {total_ent:,.2f}")
+        c2.metric("Custos (Saída)", f"R$ {total_sai:,.2f}")
+        c3.metric("Lucro Estimado", f"R$ {lucro:,.2f}")
+        c4.metric("Obras Ativas", len(df_obras))
+        
         st.divider()
         
-        col_graf1, col_graf2 = st.columns(2)
-        with col_graf1:
-            st.subheader("Entradas vs Saídas por Mês")
-            # Gráfico de barras agrupadas
-            fig_bar = px.bar(df_financeiro, x=df_financeiro['Data_Lancamento'].dt.strftime('%b/%y'), y='Valor', 
-                             color='Tipo_Lancamento', barmode='group',
-                             color_discrete_map={'Entrada': '#2ecc71', 'Saída': '#e74c3c'})
-            st.plotly_chart(fig_bar, use_container_width=True)
-            
-        with col_graf2:
-            st.subheader("Distribuição de Custos")
-            fig_pie = px.pie(df_financeiro[df_financeiro['Tipo_Lancamento'] == 'Saída'], values='Valor', names='Categoria', hole=0.4)
-            st.plotly_chart(fig_pie, use_container_width=True)
+        if not df_fin.empty:
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                st.subheader("Custos por Categoria")
+                fig_pizza = px.pie(df_fin[df_fin['Tipo_Lancamento'] == 'Saída'], values='Valor', names='Categoria', hole=0.4)
+                st.plotly_chart(fig_pizza, use_container_width=True)
+            with col_g2:
+                st.subheader("Fluxo de Caixa")
+                fig_bar = px.bar(df_fin, x='Categoria', y='Valor', color='Tipo_Lancamento', barmode='group')
+                st.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            st.info("💡 Realize lançamentos financeiros para gerar os gráficos automáticos.")
 
-    # 2. GESTÃO DE OBRAS (COM EDIÇÃO E EXCLUSÃO)
+    # --- ABA: GESTÃO DE OBRAS ---
     elif menu == "🏗️ Gestão de Obras":
-        st.title("🏗️ Gestão de Obras e Contratos")
+        st.header("🏗️ Gerenciamento de Contratos")
         
-        tab1, tab2 = st.tabs(["Lista de Obras (Editar/Excluir)", "Cadastrar Nova Obra"])
-        
-        with tab1:
-            st.write("Dica: Altere os dados diretamente na tabela e clique em Salvar.")
-            # Editor de dados do Streamlit (Ponto 3 do seu pedido)
-            df_edit_obras = st.data_editor(df_obras, num_rows="dynamic", key="editor_obras_v3")
-            if st.button("Salvar Alterações nas Obras"):
-                conn = get_db_connection()
-                df_edit_obras.to_sql("obras", conn, if_exists="replace", index=False)
-                st.success("Dados das obras atualizados com sucesso!")
-        
-        with tab2:
-            with st.form("form_nova_obra"):
-                n = st.text_input("Nome da Obra")
-                t = st.selectbox("Tipo", ["Pública", "Privada"])
-                v = st.number_input("Valor do Contrato", min_value=0.0)
-                b = st.number_input("BDI (%)", value=25.0)
+        with st.expander("➕ Adicionar Novo Contrato/Obra"):
+            with st.form("form_obra"):
+                nome = st.text_input("Nome da Obra/Cliente")
+                tipo = st.selectbox("Tipo", ["Industrial", "Residencial", "Subestação", "Manutenção"])
+                val = st.number_input("Valor Total do Contrato", min_value=0.0)
                 if st.form_submit_button("Cadastrar Obra"):
-                    conn = get_db_connection()
-                    conn.execute("INSERT INTO obras (Nome_Obra, Tipo_Obra, Valor_Contrato, BDI_Aplicado_Percent) VALUES (?,?,?,?)", (n,t,v,b))
+                    conn = sqlite3.connect(DB_FILE)
+                    conn.execute("INSERT INTO obras (Nome_Obra, Tipo_Obra, Valor_Contrato) VALUES (?,?,?)", (nome, tipo, val))
                     conn.commit()
-                    st.success("Obra cadastrada!")
+                    st.success("Obra registrada com sucesso!")
                     st.rerun()
-
-    # 3. FINANCEIRO (SEU CÓDIGO ORIGINAL VOLTANDO A FUNCIONAR)
-    elif menu == "💰 Lançamento Financeiro":
-        st.title("💰 Lançamentos Financeiros")
         
-        # Área de Lançamento
-        with st.expander("➕ Realizar Novo Lançamento"):
-            with st.form("novo_fin"):
-                obra_sel = st.selectbox("Obra", df_obras['Nome_Obra'])
-                tipo = st.selectbox("Tipo", ["Saída", "Entrada"])
-                cat = st.selectbox("Categoria", ["Materiais Elétricos", "Mão de Obra", "Impostos", "Medição", "Outros"])
-                val = st.number_input("Valor", min_value=0.0)
-                desc = st.text_input("Descrição")
-                if st.form_submit_button("Lançar"):
-                    id_o = df_obras[df_obras['Nome_Obra'] == obra_sel]['ID_Obra'].iloc[0]
-                    conn = get_db_connection()
-                    conn.execute("INSERT INTO financeiro (ID_Obra, Tipo_Lancamento, Categoria, Valor, Descricao, Data_Lancamento) VALUES (?,?,?,?,?,?)",
-                                 (int(id_o), tipo, cat, val, desc, datetime.now().strftime("%Y-%m-%d")))
-                    conn.commit()
-                    st.success("Lançado!")
+        if not df_obras.empty:
+            st.subheader("Obras Cadastradas (Edição Direta)")
+            st.write("Dica: Edite os valores na tabela e clique no botão abaixo para salvar.")
+            
+            df_edit_o = st.data_editor(df_obras, num_rows="dynamic", key="ed_obras_v3")
+            
+            if st.button("💾 Salvar Alterações nas Obras"):
+                conn = sqlite3.connect(DB_FILE)
+                df_edit_o.to_sql("obras", conn, if_exists="replace", index=False)
+                st.success("Banco de dados atualizado!")
+                st.rerun()
+
+    # --- ABA: FINANCEIRO ---
+    elif menu == "💰 Lançamentos":
+        st.header("💰 Movimentações Financeiras")
+        
+        if df_obras.empty:
+            st.warning("⚠️ Cadastre uma obra primeiro.")
+        else:
+            with st.expander("➕ Novo Lançamento"):
+                with st.form("form_fin"):
+                    obra_sel = st.selectbox("Obra", df_obras['Nome_Obra'])
+                    tipo_l = st.selectbox("Tipo", ["Saída", "Entrada"])
+                    cat_l = st.selectbox("Categoria", ["Materiais", "Mão de Obra", "Medição"])
+                    valor_l = st.number_input("Valor (R$)", min_value=0.0)
+                    if st.form_submit_button("Registrar"):
+                        id_o = df_obras[df_obras['Nome_Obra'] == obra_sel]['ID_Obra'].iloc[0]
+                        conn = sqlite3.connect(DB_FILE)
+                        conn.execute("INSERT INTO financeiro (ID_Obra, Tipo_Lancamento, Categoria, Valor) VALUES (?,?,?,?)",
+                                     (int(id_o), tipo_l, cat_l, valor_l))
+                        conn.commit()
+                        st.success("Lançamento concluído!")
+                        st.rerun()
+
+            if not df_fin.empty:
+                st.subheader("Histórico (Editável)")
+                df_edit_f = st.data_editor(df_fin, num_rows="dynamic", key="ed_fin_v3")
+                if st.button("💾 Confirmar Ajustes Financeiros"):
+                    conn = sqlite3.connect(DB_FILE)
+                    df_edit_f.to_sql("financeiro", conn, if_exists="replace", index=False)
+                    st.success("Histórico atualizado!")
                     st.rerun()
-
-        st.subheader("Histórico Completo (Editável)")
-        df_edit_fin = st.data_editor(df_financeiro, num_rows="dynamic", key="editor_fin_v3")
-        if st.button("Salvar Alterações Financeiras"):
-            conn = get_db_connection()
-            df_edit_fin.to_sql("financeiro", conn, if_exists="replace", index=False)
-            st.success("Financeiro atualizado!")
-            st.rerun()
-
-    # (Outras abas como Equipe e Diário de Obra seguem o mesmo padrão...)
